@@ -1,0 +1,27 @@
+# Backup Ignore Patterns
+# This file can be used with --exclude @.backupignore
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.bak
+
+# Log files
+*.log
+
+# Cache directories
+cache/
+.cache/
+tmp/
+temp/
+
+# System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Large media files (optional)
+# *.mov
+# *.mp4
+# *.avi

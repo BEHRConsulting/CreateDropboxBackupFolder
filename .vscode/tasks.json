@@ -1,0 +1,20 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build Dropbox Backup Tool",
+			"type": "shell",
+			"command": "go",
+			"args": [
+				"build",
+				"-o",
+				"create-dropbox-backup-folder"
+			],
+			"group": "build",
+			"problemMatcher": [
+				"$go"
+			],
+			"isBackground": false
+		}
+	]
+}

@@ -1,0 +1,1634 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>backup: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">create-dropbox-backup-folder/internal/backup/engine.go (31.5%)</option>
+				
+				<option value="file1">create-dropbox-backup-folder/internal/config/config.go (90.9%)</option>
+				
+				<option value="file2">create-dropbox-backup-folder/internal/dropbox/client.go (17.1%)</option>
+				
+				<option value="file3">create-dropbox-backup-folder/internal/dropbox/interactive_auth.go (0.0%)</option>
+				
+				<option value="file4">create-dropbox-backup-folder/main.go (14.5%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package backup
+
+import (
+        "context"
+        "fmt"
+        "io"
+        "log/slog"
+        "os"
+        "path/filepath"
+        "strings"
+        "sync"
+        "time"
+
+        "create-dropbox-backup-folder/internal/config"
+        "create-dropbox-backup-folder/internal/dropbox"
+)
+
+// Engine handles the backup process
+type Engine struct {
+        config        *config.Config
+        dropboxClient *dropbox.Client
+        semaphore     chan struct{}
+}
+
+// Stats tracks backup statistics
+type Stats struct {
+        TotalFiles      int
+        TotalFolders    int
+        DownloadedFiles int
+        SkippedFiles    int
+        DeletedFiles    int
+        TotalBytes      uint64
+        StartTime       time.Time
+        EndTime         time.Time
+}
+
+// New creates a new backup engine
+func New(cfg *config.Config) (*Engine, error) <span class="cov8" title="1">{
+        // Create Dropbox client with enhanced authentication
+        dbxClient, err := dropbox.New(
+                cfg.ClientID,
+                cfg.ClientSecret,
+                cfg.AccessToken,
+                cfg.RefreshToken,
+        )
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to create Dropbox client: %w", err)
+        }</span>
+
+        // Validate token and permissions
+        <span class="cov8" title="1">ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+        defer cancel()
+
+        if err := dbxClient.ValidateTokenScopes(ctx); err != nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("token validation failed: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">slog.Info("Dropbox authentication successful")
+
+        // Create semaphore for concurrency control
+        semaphore := make(chan struct{}, cfg.MaxConcurrency)
+
+        return &amp;Engine{
+                config:        cfg,
+                dropboxClient: dbxClient,
+                semaphore:     semaphore,
+        }, nil</span>
+}
+
+// Run executes the backup process
+func (e *Engine) Run(ctx context.Context) error <span class="cov0" title="0">{
+        stats := &amp;Stats{
+                StartTime: time.Now(),
+        }
+
+        slog.Info("Starting backup process",
+                slog.String("backup_dir", e.config.BackupDir),
+                slog.Int("max_concurrency", e.config.MaxConcurrency),
+        )
+
+        // Check and refresh token if needed
+        if !e.dropboxClient.IsTokenValid() </span><span class="cov0" title="0">{
+                slog.Info("Token needs refresh, attempting to refresh...")
+                if err := e.dropboxClient.RefreshToken(ctx); err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("failed to refresh token: %w", err)
+                }</span>
+        }
+
+        // List all files from Dropbox
+        <span class="cov0" title="0">slog.Info("Listing files from Dropbox...")
+        dropboxFiles, err := e.dropboxClient.ListAll(ctx)
+        if err != nil </span><span class="cov0" title="0">{
+                // Try refreshing token and retry once if listing fails
+                slog.Warn("File listing failed, attempting token refresh...")
+                if refreshErr := e.dropboxClient.RefreshToken(ctx); refreshErr != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("failed to list Dropbox files and refresh token: %w", err)
+                }</span>
+
+                // Retry listing after token refresh
+                <span class="cov0" title="0">dropboxFiles, err = e.dropboxClient.ListAll(ctx)
+                if err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("failed to list Dropbox files after token refresh: %w", err)
+                }</span>
+        }
+
+        // Count files and folders separately
+        <span class="cov0" title="0">fileCount := 0
+        folderCount := 0
+        for _, file := range dropboxFiles </span><span class="cov0" title="0">{
+                if file.IsFolder </span><span class="cov0" title="0">{
+                        folderCount++
+                }</span> else<span class="cov0" title="0"> {
+                        fileCount++
+                }</span>
+        }
+
+        <span class="cov0" title="0">stats.TotalFiles = fileCount
+        stats.TotalFolders = folderCount
+        slog.Info("Found items in Dropbox",
+                slog.Int("files", fileCount),
+                slog.Int("folders", folderCount),
+                slog.Int("total", len(dropboxFiles)),
+        )
+
+        // Filter files based on exclusion patterns
+        filteredFiles := e.filterFiles(dropboxFiles)
+        slog.Info("Files after filtering", slog.Int("count", len(filteredFiles)))
+
+        // Download files concurrently
+        if err := e.downloadFiles(ctx, filteredFiles, stats); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to download files: %w", err)
+        }</span>
+
+        // Handle deletion if enabled
+        <span class="cov0" title="0">if e.config.Delete </span><span class="cov0" title="0">{
+                if err := e.deleteOrphanedFiles(ctx, filteredFiles, stats); err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("failed to delete orphaned files: %w", err)
+                }</span>
+        }
+
+        <span class="cov0" title="0">stats.EndTime = time.Now()
+        e.logStats(stats)
+
+        return nil</span>
+}
+
+func (e *Engine) filterFiles(files []dropbox.FileInfo) []dropbox.FileInfo <span class="cov0" title="0">{
+        if len(e.config.Exclude) == 0 </span><span class="cov0" title="0">{
+                return files
+        }</span>
+
+        <span class="cov0" title="0">var filtered []dropbox.FileInfo
+        for _, file := range files </span><span class="cov0" title="0">{
+                if !e.shouldExclude(file.Path) </span><span class="cov0" title="0">{
+                        filtered = append(filtered, file)
+                }</span> else<span class="cov0" title="0"> {
+                        slog.Debug("Excluding file", slog.String("path", file.Path))
+                }</span>
+        }
+
+        <span class="cov0" title="0">return filtered</span>
+}
+
+func (e *Engine) shouldExclude(path string) bool <span class="cov8" title="1">{
+        for _, pattern := range e.config.Exclude </span><span class="cov8" title="1">{
+                // Handle @filename pattern (exclusion file)
+                if strings.HasPrefix(pattern, "@") </span><span class="cov0" title="0">{
+                        excludeFile := strings.TrimPrefix(pattern, "@")
+                        if e.isInExcludeFile(path, excludeFile) </span><span class="cov0" title="0">{
+                                return true
+                        }</span>
+                        <span class="cov0" title="0">continue</span>
+                }
+
+                // Handle directory patterns
+                <span class="cov8" title="1">if strings.HasSuffix(pattern, "/") </span><span class="cov8" title="1">{
+                        if strings.HasPrefix(path, pattern) || strings.Contains(path, "/"+pattern) </span><span class="cov8" title="1">{
+                                return true
+                        }</span>
+                        <span class="cov8" title="1">continue</span>
+                }
+
+                // Handle file patterns
+                <span class="cov8" title="1">if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched </span><span class="cov8" title="1">{
+                        return true
+                }</span>
+
+                // Handle path patterns
+                <span class="cov8" title="1">if matched, _ := filepath.Match(pattern, path); matched </span><span class="cov8" title="1">{
+                        return true
+                }</span>
+        }
+
+        <span class="cov8" title="1">return false</span>
+}
+
+func (e *Engine) isInExcludeFile(path, excludeFile string) bool <span class="cov0" title="0">{
+        // This is a simplified implementation
+        // In a real implementation, you would read the exclude file
+        // and check if the path matches any patterns in it
+        return false
+}</span>
+
+func (e *Engine) downloadFiles(ctx context.Context, files []dropbox.FileInfo, stats *Stats) error <span class="cov0" title="0">{
+        var wg sync.WaitGroup
+        errChan := make(chan error, len(files))
+
+        for _, file := range files </span><span class="cov0" title="0">{
+                if file.IsFolder </span><span class="cov0" title="0">{
+                        continue</span> // Skip folders, they're created automatically
+                }
+
+                <span class="cov0" title="0">wg.Add(1)
+                go func(file dropbox.FileInfo) </span><span class="cov0" title="0">{
+                        defer wg.Done()
+
+                        // Acquire semaphore
+                        select </span>{
+                        case e.semaphore &lt;- struct{}{}:<span class="cov0" title="0">
+                                defer func() </span><span class="cov0" title="0">{ &lt;-e.semaphore }</span>()
+                        case &lt;-ctx.Done():<span class="cov0" title="0">
+                                errChan &lt;- ctx.Err()
+                                return</span>
+                        }
+
+                        <span class="cov0" title="0">if err := e.downloadFile(ctx, file, stats); err != nil </span><span class="cov0" title="0">{
+                                errChan &lt;- fmt.Errorf("failed to download %s: %w", file.Path, err)
+                        }</span>
+                }(file)
+        }
+
+        // Wait for all downloads to complete
+        <span class="cov0" title="0">go func() </span><span class="cov0" title="0">{
+                wg.Wait()
+                close(errChan)
+        }</span>()
+
+        // Collect any errors
+        <span class="cov0" title="0">for err := range errChan </span><span class="cov0" title="0">{
+                if err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+        }
+
+        <span class="cov0" title="0">return nil</span>
+}
+
+func (e *Engine) downloadFile(ctx context.Context, file dropbox.FileInfo, stats *Stats) error <span class="cov0" title="0">{
+        localPath := filepath.Join(e.config.BackupDir, strings.TrimPrefix(file.Path, "/"))
+
+        // Check if file already exists and is newer
+        if e.shouldSkipFile(localPath, file) </span><span class="cov0" title="0">{
+                stats.SkippedFiles++
+                slog.Debug("Skipping file (already up to date)", slog.String("path", file.Path))
+                return nil
+        }</span>
+
+        // Create directory if it doesn't exist
+        <span class="cov0" title="0">if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to create directory: %w", err)
+        }</span>
+
+        // Download file
+        <span class="cov0" title="0">reader, _, err := e.dropboxClient.Download(ctx, file.Path)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to download from Dropbox: %w", err)
+        }</span>
+        <span class="cov0" title="0">defer reader.Close()
+
+        // Create local file
+        localFile, err := os.Create(localPath)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to create local file: %w", err)
+        }</span>
+        <span class="cov0" title="0">defer localFile.Close()
+
+        // Copy content
+        written, err := io.Copy(localFile, reader)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to write file content: %w", err)
+        }</span>
+
+        // Set modification time
+        <span class="cov0" title="0">if !file.ModTime.IsZero() </span><span class="cov0" title="0">{
+                if err := os.Chtimes(localPath, file.ModTime, file.ModTime); err != nil </span><span class="cov0" title="0">{
+                        slog.Warn("Failed to set file modification time",
+                                slog.String("path", localPath),
+                                slog.String("error", err.Error()),
+                        )
+                }</span>
+        }
+
+        <span class="cov0" title="0">stats.DownloadedFiles++
+        stats.TotalBytes += uint64(written)
+
+        slog.Info("Downloaded file",
+                slog.String("path", file.Path),
+                slog.Int64("size", written),
+        )
+
+        return nil</span>
+}
+
+func (e *Engine) shouldSkipFile(localPath string, remoteFile dropbox.FileInfo) bool <span class="cov8" title="1">{
+        stat, err := os.Stat(localPath)
+        if err != nil </span><span class="cov8" title="1">{
+                return false // File doesn't exist, don't skip
+        }</span>
+
+        // Compare modification times
+        <span class="cov8" title="1">if !remoteFile.ModTime.IsZero() &amp;&amp; stat.ModTime().After(remoteFile.ModTime) </span><span class="cov8" title="1">{
+                return true // Local file is newer
+        }</span>
+
+        // Compare sizes
+        <span class="cov8" title="1">if stat.Size() == int64(remoteFile.Size) &amp;&amp; !remoteFile.ModTime.IsZero() &amp;&amp; stat.ModTime().Equal(remoteFile.ModTime) </span><span class="cov8" title="1">{
+                return true // Same size and modification time
+        }</span>
+
+        <span class="cov8" title="1">return false</span>
+}
+
+func (e *Engine) deleteOrphanedFiles(ctx context.Context, dropboxFiles []dropbox.FileInfo, stats *Stats) error <span class="cov0" title="0">{
+        // Create a map of Dropbox files for quick lookup
+        dropboxFileMap := make(map[string]bool)
+        for _, file := range dropboxFiles </span><span class="cov0" title="0">{
+                localPath := filepath.Join(e.config.BackupDir, strings.TrimPrefix(file.Path, "/"))
+                dropboxFileMap[localPath] = true
+        }</span>
+
+        // Walk through local backup directory
+        <span class="cov0" title="0">return filepath.Walk(e.config.BackupDir, func(path string, info os.FileInfo, err error) error </span><span class="cov0" title="0">{
+                if err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+
+                // Skip directories
+                <span class="cov0" title="0">if info.IsDir() </span><span class="cov0" title="0">{
+                        return nil
+                }</span>
+
+                // Check if file exists in Dropbox
+                <span class="cov0" title="0">if !dropboxFileMap[path] </span><span class="cov0" title="0">{
+                        slog.Info("Deleting orphaned file", slog.String("path", path))
+                        if err := os.Remove(path); err != nil </span><span class="cov0" title="0">{
+                                return fmt.Errorf("failed to delete file %s: %w", path, err)
+                        }</span>
+                        <span class="cov0" title="0">stats.DeletedFiles++</span>
+                }
+
+                <span class="cov0" title="0">return nil</span>
+        })
+}
+
+func (e *Engine) logStats(stats *Stats) <span class="cov8" title="1">{
+        duration := stats.EndTime.Sub(stats.StartTime)
+
+        // Always log basic completion info
+        slog.Info("Backup completed",
+                slog.Int("downloaded_files", stats.DownloadedFiles),
+                slog.Int("skipped_files", stats.SkippedFiles),
+                slog.Int("deleted_files", stats.DeletedFiles),
+                slog.Duration("duration", duration),
+        )
+
+        // Display count information if requested
+        if e.config.ShowCount </span><span class="cov8" title="1">{
+                fmt.Printf("\n📊 File Count Summary:\n")
+                fmt.Printf("   Total files processed: %d\n", stats.TotalFiles)
+                fmt.Printf("   Total folders processed: %d\n", stats.TotalFolders)
+                fmt.Printf("   Total items: %d\n", stats.TotalFiles+stats.TotalFolders)
+                fmt.Printf("   Files downloaded: %d\n", stats.DownloadedFiles)
+                fmt.Printf("   Files skipped: %d\n", stats.SkippedFiles)
+                if stats.DeletedFiles &gt; 0 </span><span class="cov8" title="1">{
+                        fmt.Printf("   Files deleted: %d\n", stats.DeletedFiles)
+                }</span>
+        }
+
+        // Display size information if requested
+        <span class="cov8" title="1">if e.config.ShowSize </span><span class="cov8" title="1">{
+                fmt.Printf("\n💾 Size Summary:\n")
+                fmt.Printf("   Total bytes processed: %s\n", formatBytes(stats.TotalBytes))
+                if duration &gt; 0 </span><span class="cov8" title="1">{
+                        bytesPerSecond := float64(stats.TotalBytes) / duration.Seconds()
+                        fmt.Printf("   Average transfer rate: %s/s\n", formatBytes(uint64(bytesPerSecond)))
+                }</span>
+        }
+
+        // Add a separator if either count or size was displayed
+        <span class="cov8" title="1">if e.config.ShowCount || e.config.ShowSize </span><span class="cov8" title="1">{
+                fmt.Println()
+        }</span>
+}
+
+// formatBytes formats byte counts in human-readable format
+func formatBytes(bytes uint64) string <span class="cov8" title="1">{
+        const unit = 1024
+        if bytes &lt; unit </span><span class="cov8" title="1">{
+                return fmt.Sprintf("%d B", bytes)
+        }</span>
+        <span class="cov8" title="1">div, exp := uint64(unit), 0
+        for n := bytes / unit; n &gt;= unit; n /= unit </span><span class="cov8" title="1">{
+                div *= unit
+                exp++
+        }</span>
+        <span class="cov8" title="1">return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package config
+
+import (
+        "fmt"
+        "os"
+        "path/filepath"
+        "time"
+)
+
+// Config holds the application configuration
+type Config struct {
+        // Dropbox OAuth2 settings
+        ClientID     string `json:"client_id"`
+        ClientSecret string `json:"client_secret"`
+        AccessToken  string `json:"access_token"`
+        RefreshToken string `json:"refresh_token"`
+
+        // Backup settings
+        BackupDir string   `json:"backup_dir"`
+        Delete    bool     `json:"delete"`
+        Exclude   []string `json:"exclude"`
+
+        // Application settings
+        LogLevel  string `json:"log_level"`
+        ShowCount bool   `json:"show_count"`
+        ShowSize  bool   `json:"show_size"`
+
+        // Runtime settings
+        MaxConcurrency int           `json:"max_concurrency"`
+        RetryAttempts  int           `json:"retry_attempts"`
+        RetryDelay     time.Duration `json:"retry_delay"`
+}
+
+// Options represents command-line options for configuration
+type Options struct {
+        ConfigFile string
+        BackupDir  string
+        LogLevel   string
+        Delete     bool
+        Exclude    []string
+        ShowCount  bool
+        ShowSize   bool
+}
+
+// Load creates a new configuration from options and environment variables
+func Load(opts Options) (*Config, error) <span class="cov8" title="1">{
+        cfg := &amp;Config{
+                LogLevel:       "error",
+                MaxConcurrency: 5,
+                RetryAttempts:  3,
+                RetryDelay:     time.Second * 2,
+        }
+
+        // Load from environment variables
+        if err := cfg.loadFromEnv(); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to load from environment: %w", err)
+        }</span>
+
+        // Override with command-line options
+        <span class="cov8" title="1">if opts.LogLevel != "" </span><span class="cov8" title="1">{
+                cfg.LogLevel = opts.LogLevel
+        }</span>
+        <span class="cov8" title="1">if opts.Delete </span><span class="cov8" title="1">{
+                cfg.Delete = opts.Delete
+        }</span>
+        <span class="cov8" title="1">if len(opts.Exclude) &gt; 0 </span><span class="cov8" title="1">{
+                cfg.Exclude = opts.Exclude
+        }</span>
+        <span class="cov8" title="1">cfg.ShowCount = opts.ShowCount
+        cfg.ShowSize = opts.ShowSize
+
+        // Set backup directory
+        if err := cfg.setBackupDir(opts.BackupDir); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to set backup directory: %w", err)
+        }</span>
+
+        // Validate configuration
+        <span class="cov8" title="1">if err := cfg.validate(); err != nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("configuration validation failed: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">return cfg, nil</span>
+}
+
+func (c *Config) loadFromEnv() error <span class="cov8" title="1">{
+        // Dropbox OAuth2 credentials
+        c.ClientID = os.Getenv("DROPBOX_CLIENT_ID")
+        c.ClientSecret = os.Getenv("DROPBOX_CLIENT_SECRET")
+        c.AccessToken = os.Getenv("DROPBOX_ACCESS_TOKEN")
+        c.RefreshToken = os.Getenv("DROPBOX_REFRESH_TOKEN")
+
+        return nil
+}</span>
+
+func (c *Config) setBackupDir(backupDir string) error <span class="cov8" title="1">{
+        // Priority: command-line flag &gt; environment variable &gt; default
+        if backupDir != "" </span><span class="cov8" title="1">{
+                c.BackupDir = backupDir
+        }</span> else<span class="cov8" title="1"> if envDir := os.Getenv("DROPBOX_BACKUP_FOLDER"); envDir != "" </span><span class="cov8" title="1">{
+                c.BackupDir = envDir
+        }</span> else<span class="cov8" title="1"> {
+                // Create default backup folder with timestamp
+                timestamp := time.Now().Format("2006-01-02-15-04-05")
+                c.BackupDir = fmt.Sprintf("./dropbox_backup_%s", timestamp)
+        }</span>
+
+        // Convert to absolute path
+        <span class="cov8" title="1">absPath, err := filepath.Abs(c.BackupDir)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to get absolute path for backup directory: %w", err)
+        }</span>
+        <span class="cov8" title="1">c.BackupDir = absPath
+
+        // Create directory if it doesn't exist
+        if err := os.MkdirAll(c.BackupDir, 0755); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to create backup directory: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+func (c *Config) validate() error <span class="cov8" title="1">{
+        if c.ClientID == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("DROPBOX_CLIENT_ID environment variable is required")
+        }</span>
+        <span class="cov8" title="1">if c.ClientSecret == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("DROPBOX_CLIENT_SECRET environment variable is required")
+        }</span>
+        <span class="cov8" title="1">if c.BackupDir == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("backup directory is required")
+        }</span>
+
+        // Validate log level
+        <span class="cov8" title="1">validLevels := map[string]bool{
+                "debug": true,
+                "info":  true,
+                "warn":  true,
+                "error": true,
+        }
+        if !validLevels[c.LogLevel] </span><span class="cov8" title="1">{
+                return fmt.Errorf("invalid log level: %s (must be debug, info, warn, or error)", c.LogLevel)
+        }</span>
+
+        <span class="cov8" title="1">return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package dropbox
+
+import (
+        "context"
+        "crypto/rand"
+        "crypto/sha256"
+        "encoding/base64"
+        "fmt"
+        "io"
+        "log/slog"
+        "net/url"
+        "time"
+
+        "github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox"
+        "github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox/files"
+        "golang.org/x/oauth2"
+)
+
+// Client wraps the Dropbox API client with additional functionality
+type Client struct {
+        dbx      files.Client
+        config   *oauth2.Config
+        token    *oauth2.Token
+        tokenSrc oauth2.TokenSource
+}
+
+// AuthConfig holds OAuth2 configuration for Dropbox
+type AuthConfig struct {
+        ClientID     string
+        ClientSecret string
+        RedirectURL  string
+        Scopes       []string
+}
+
+// TokenInfo represents token information for storage/retrieval
+type TokenInfo struct {
+        AccessToken  string    `json:"access_token"`
+        RefreshToken string    `json:"refresh_token"`
+        TokenType    string    `json:"token_type"`
+        Expiry       time.Time `json:"expiry"`
+}
+
+// FileInfo represents metadata about a Dropbox file
+type FileInfo struct {
+        Path        string
+        Name        string
+        Size        uint64
+        ModTime     time.Time
+        IsFolder    bool
+        ContentHash string
+        Rev         string
+}
+
+// NewAuthConfig creates a new OAuth2 configuration for Dropbox
+func NewAuthConfig(clientID, clientSecret, redirectURL string) *AuthConfig <span class="cov8" title="1">{
+        if redirectURL == "" </span><span class="cov8" title="1">{
+                redirectURL = "http://localhost:8080/callback"
+        }</span>
+
+        // Dropbox scopes - use the correct scope names
+        <span class="cov8" title="1">scopes := []string{
+                "files.metadata.read",
+                "files.content.read",
+        }
+
+        return &amp;AuthConfig{
+                ClientID:     clientID,
+                ClientSecret: clientSecret,
+                RedirectURL:  redirectURL,
+                Scopes:       scopes,
+        }</span>
+}
+
+// GetOAuth2Config returns the OAuth2 configuration
+func (ac *AuthConfig) GetOAuth2Config() *oauth2.Config <span class="cov8" title="1">{
+        return &amp;oauth2.Config{
+                ClientID:     ac.ClientID,
+                ClientSecret: ac.ClientSecret,
+                RedirectURL:  ac.RedirectURL,
+                Scopes:       ac.Scopes,
+                Endpoint: oauth2.Endpoint{
+                        AuthURL:   "https://www.dropbox.com/oauth2/authorize",
+                        TokenURL:  "https://api.dropboxapi.com/oauth2/token", // Correct Dropbox API endpoint
+                        AuthStyle: oauth2.AuthStyleInHeader,
+                },
+        }
+}</span>
+
+// DebugOAuth2Config prints OAuth2 configuration for debugging
+func (ac *AuthConfig) DebugOAuth2Config() <span class="cov0" title="0">{
+        config := ac.GetOAuth2Config()
+        slog.Debug("OAuth2 Configuration",
+                slog.String("client_id", ac.ClientID),
+                slog.String("redirect_url", ac.RedirectURL),
+                slog.String("auth_url", config.Endpoint.AuthURL),
+                slog.String("token_url", config.Endpoint.TokenURL),
+                slog.Any("scopes", ac.Scopes),
+        )
+}</span>
+
+// GenerateAuthURL generates a secure authorization URL
+func (ac *AuthConfig) GenerateAuthURL(state string) (string, string, error) <span class="cov8" title="1">{
+        config := ac.GetOAuth2Config()
+
+        // For Dropbox, let's use the standard OAuth2 flow without PKCE for now
+        // Dropbox may not fully support PKCE or may have specific requirements
+
+        // Build authorization URL
+        authURL := config.AuthCodeURL(state,
+                oauth2.SetAuthURLParam("token_access_type", "offline"), // Request refresh token
+                oauth2.SetAuthURLParam("force_reapprove", "false"),     // Don't force reapproval
+        )
+
+        return authURL, "", nil // Return empty code verifier since we're not using PKCE
+}</span>
+
+// ExchangeCode exchanges authorization code for tokens
+func (ac *AuthConfig) ExchangeCode(ctx context.Context, code, codeVerifier string) (*oauth2.Token, error) <span class="cov0" title="0">{
+        config := ac.GetOAuth2Config()
+
+        slog.Debug("Attempting token exchange",
+                slog.String("token_url", config.Endpoint.TokenURL),
+                slog.String("client_id", ac.ClientID),
+                slog.String("redirect_url", ac.RedirectURL),
+        )
+
+        // Use standard OAuth2 exchange
+        token, err := config.Exchange(ctx, code)
+        if err != nil </span><span class="cov0" title="0">{
+                // Log detailed error information
+                slog.Error("Token exchange failed",
+                        slog.String("error", err.Error()),
+                        slog.String("code_length", fmt.Sprintf("%d", len(code))),
+                )
+                return nil, fmt.Errorf("failed to exchange authorization code: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">slog.Info("Successfully exchanged authorization code for tokens",
+                slog.Bool("has_refresh_token", token.RefreshToken != ""),
+                slog.Time("expires_at", token.Expiry),
+        )
+
+        return token, nil</span>
+}
+
+// NewWithToken creates a new Dropbox client with an existing token
+func NewWithToken(authConfig *AuthConfig, token *oauth2.Token) (*Client, error) <span class="cov8" title="1">{
+        config := authConfig.GetOAuth2Config()
+
+        // Create token source that automatically refreshes tokens
+        tokenSrc := config.TokenSource(context.Background(), token)
+
+        // Get a fresh token (this will refresh if needed)
+        freshToken, err := tokenSrc.Token()
+        if err != nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("failed to get fresh token: %w", err)
+        }</span>
+
+        // Create HTTP client with automatic token refresh
+        <span class="cov8" title="1">httpClient := config.Client(context.Background(), freshToken)
+
+        // Create Dropbox client
+        dbx := files.New(dropbox.Config{
+                Token:  freshToken.AccessToken,
+                Client: httpClient,
+        })
+
+        return &amp;Client{
+                dbx:      dbx,
+                config:   config,
+                token:    freshToken,
+                tokenSrc: tokenSrc,
+        }, nil</span>
+}
+
+// Legacy constructor for backward compatibility
+func New(clientID, clientSecret, accessToken, refreshToken string) (*Client, error) <span class="cov8" title="1">{
+        authConfig := NewAuthConfig(clientID, clientSecret, "")
+
+        token := &amp;oauth2.Token{
+                AccessToken:  accessToken,
+                RefreshToken: refreshToken,
+        }
+
+        return NewWithToken(authConfig, token)
+}</span>
+
+// RefreshToken refreshes the access token if needed
+func (c *Client) RefreshToken(ctx context.Context) error <span class="cov0" title="0">{
+        if c.tokenSrc == nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("no token source available for refresh")
+        }</span>
+
+        // Get fresh token (automatically refreshes if needed)
+        <span class="cov0" title="0">freshToken, err := c.tokenSrc.Token()
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to refresh token: %w", err)
+        }</span>
+
+        // Update stored token
+        <span class="cov0" title="0">c.token = freshToken
+
+        // Recreate Dropbox client with new token
+        httpClient := c.config.Client(ctx, freshToken)
+        c.dbx = files.New(dropbox.Config{
+                Token:  freshToken.AccessToken,
+                Client: httpClient,
+        })
+
+        slog.Info("Token refreshed successfully",
+                slog.Time("new_expiry", freshToken.Expiry),
+        )
+
+        return nil</span>
+}
+
+// GetTokenInfo returns current token information
+func (c *Client) GetTokenInfo() TokenInfo <span class="cov0" title="0">{
+        return TokenInfo{
+                AccessToken:  c.token.AccessToken,
+                RefreshToken: c.token.RefreshToken,
+                TokenType:    c.token.TokenType,
+                Expiry:       c.token.Expiry,
+        }
+}</span>
+
+// IsTokenValid checks if the current token is valid and not expired
+func (c *Client) IsTokenValid() bool <span class="cov0" title="0">{
+        if c.token == nil </span><span class="cov0" title="0">{
+                return false
+        }</span>
+
+        // Check if token is expired (with 5-minute buffer)
+        <span class="cov0" title="0">if !c.token.Expiry.IsZero() &amp;&amp; time.Now().Add(5*time.Minute).After(c.token.Expiry) </span><span class="cov0" title="0">{
+                return false
+        }</span>
+
+        <span class="cov0" title="0">return c.token.AccessToken != ""</span>
+}
+
+// PKCE (Proof Key for Code Exchange) helper functions for enhanced security
+
+// generateCodeVerifier generates a cryptographically random code verifier
+func generateCodeVerifier() (string, error) <span class="cov0" title="0">{
+        // Generate 32 random bytes (256 bits)
+        bytes := make([]byte, 32)
+        if _, err := rand.Read(bytes); err != nil </span><span class="cov0" title="0">{
+                return "", err
+        }</span>
+
+        // Base64 URL encode without padding
+        <span class="cov0" title="0">return base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(bytes), nil</span>
+}
+
+// generateCodeChallenge generates SHA256 code challenge from verifier
+func generateCodeChallenge(verifier string) string <span class="cov8" title="1">{
+        // Use SHA256 hashing as per RFC 7636
+        hash := sha256.Sum256([]byte(verifier))
+        return base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(hash[:])
+}</span>
+
+// StartOAuthFlow starts the OAuth2 flow and returns the authorization URL
+func StartOAuthFlow(authConfig *AuthConfig) (authURL, state, codeVerifier string, err error) <span class="cov0" title="0">{
+        // Generate secure random state
+        stateBytes := make([]byte, 16)
+        if _, err := rand.Read(stateBytes); err != nil </span><span class="cov0" title="0">{
+                return "", "", "", fmt.Errorf("failed to generate state: %w", err)
+        }</span>
+        <span class="cov0" title="0">state = base64.URLEncoding.EncodeToString(stateBytes)
+
+        // Generate authorization URL with PKCE
+        authURL, codeVerifier, err = authConfig.GenerateAuthURL(state)
+        if err != nil </span><span class="cov0" title="0">{
+                return "", "", "", fmt.Errorf("failed to generate auth URL: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return authURL, state, codeVerifier, nil</span>
+}
+
+// HandleOAuthCallback handles the OAuth callback and exchanges code for token
+func HandleOAuthCallback(authConfig *AuthConfig, callbackURL, expectedState, codeVerifier string) (*oauth2.Token, error) <span class="cov0" title="0">{
+        parsedURL, err := url.Parse(callbackURL)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("invalid callback URL: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">query := parsedURL.Query()
+
+        // Verify state parameter
+        state := query.Get("state")
+        if state != expectedState </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("invalid state parameter")
+        }</span>
+
+        // Check for error in callback
+        <span class="cov0" title="0">if errorParam := query.Get("error"); errorParam != "" </span><span class="cov0" title="0">{
+                errorDesc := query.Get("error_description")
+                return nil, fmt.Errorf("OAuth error: %s - %s", errorParam, errorDesc)
+        }</span>
+
+        // Get authorization code
+        <span class="cov0" title="0">code := query.Get("code")
+        if code == "" </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("no authorization code in callback")
+        }</span>
+
+        // Exchange code for token
+        <span class="cov0" title="0">ctx := context.Background()
+        token, err := authConfig.ExchangeCode(ctx, code, codeVerifier)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to exchange code for token: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">return token, nil</span>
+}
+
+// ValidateTokenScopes validates that the token has required scopes
+func (c *Client) ValidateTokenScopes(ctx context.Context) error <span class="cov0" title="0">{
+        // Test the token by making a simple API call to list the root folder
+        arg := &amp;files.ListFolderArg{
+                Path:      "",
+                Recursive: false,
+                Limit:     1, // Just need one entry to validate
+        }
+
+        _, err := c.dbx.ListFolder(arg)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("token validation failed: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">slog.Info("Token validation successful")
+        return nil</span>
+}
+
+// ListAll recursively lists all files and folders in the Dropbox account
+func (c *Client) ListAll(ctx context.Context) ([]FileInfo, error) <span class="cov0" title="0">{
+        var allFiles []FileInfo
+
+        if err := c.listRecursive(ctx, "", &amp;allFiles); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to list files: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">slog.Info("Listed all files from Dropbox", slog.Int("total_files", len(allFiles)))
+        return allFiles, nil</span>
+}
+
+func (c *Client) listRecursive(ctx context.Context, path string, allFiles *[]FileInfo) error <span class="cov0" title="0">{
+        arg := &amp;files.ListFolderArg{
+                Path:      path,
+                Recursive: false,
+        }
+
+        res, err := c.dbx.ListFolder(arg)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to list folder %s: %w", path, err)
+        }</span>
+
+        <span class="cov0" title="0">for </span><span class="cov0" title="0">{
+                for _, entry := range res.Entries </span><span class="cov0" title="0">{
+                        fileInfo := c.convertToFileInfo(entry)
+                        *allFiles = append(*allFiles, fileInfo)
+
+                        // If it's a folder, recursively list its contents
+                        if fileInfo.IsFolder </span><span class="cov0" title="0">{
+                                if err := c.listRecursive(ctx, fileInfo.Path, allFiles); err != nil </span><span class="cov0" title="0">{
+                                        return err
+                                }</span>
+                        }
+                }
+
+                // Check if there are more results
+                <span class="cov0" title="0">if !res.HasMore </span><span class="cov0" title="0">{
+                        break</span>
+                }
+
+                // Continue with the next batch
+                <span class="cov0" title="0">continueArg := &amp;files.ListFolderContinueArg{
+                        Cursor: res.Cursor,
+                }
+
+                res, err = c.dbx.ListFolderContinue(continueArg)
+                if err != nil </span><span class="cov0" title="0">{
+                        return fmt.Errorf("failed to continue listing folder %s: %w", path, err)
+                }</span>
+        }
+
+        <span class="cov0" title="0">return nil</span>
+}
+
+// Download downloads a file from Dropbox
+func (c *Client) Download(ctx context.Context, remotePath string) (io.ReadCloser, *FileInfo, error) <span class="cov0" title="0">{
+        arg := &amp;files.DownloadArg{
+                Path: remotePath,
+        }
+
+        res, content, err := c.dbx.Download(arg)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, nil, fmt.Errorf("failed to download file %s: %w", remotePath, err)
+        }</span>
+
+        <span class="cov0" title="0">fileInfo := &amp;FileInfo{
+                Path:        remotePath,
+                Name:        res.Name,
+                Size:        res.Size,
+                ModTime:     res.ClientModified,
+                IsFolder:    false,
+                ContentHash: res.ContentHash,
+                Rev:         res.Rev,
+        }
+
+        slog.Debug("Downloaded file",
+                slog.String("path", remotePath),
+                slog.Uint64("size", res.Size),
+        )
+
+        return content, fileInfo, nil</span>
+}
+
+// GetMetadata retrieves metadata for a file or folder
+func (c *Client) GetMetadata(ctx context.Context, path string) (*FileInfo, error) <span class="cov0" title="0">{
+        arg := &amp;files.GetMetadataArg{
+                Path: path,
+        }
+
+        res, err := c.dbx.GetMetadata(arg)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to get metadata for %s: %w", path, err)
+        }</span>
+
+        <span class="cov0" title="0">fileInfo := c.convertToFileInfo(res)
+        return &amp;fileInfo, nil</span>
+}
+
+func (c *Client) convertToFileInfo(entry files.IsMetadata) FileInfo <span class="cov0" title="0">{
+        switch e := entry.(type) </span>{
+        case *files.FileMetadata:<span class="cov0" title="0">
+                return FileInfo{
+                        Path:        e.PathLower,
+                        Name:        e.Name,
+                        Size:        e.Size,
+                        ModTime:     e.ClientModified,
+                        IsFolder:    false,
+                        ContentHash: e.ContentHash,
+                        Rev:         e.Rev,
+                }</span>
+        case *files.FolderMetadata:<span class="cov0" title="0">
+                return FileInfo{
+                        Path:     e.PathLower,
+                        Name:     e.Name,
+                        Size:     0,
+                        ModTime:  time.Time{}, // Folders don't have modification times
+                        IsFolder: true,
+                }</span>
+        default:<span class="cov0" title="0">
+                // Handle other metadata types (e.g., DeletedMetadata)
+                return FileInfo{
+                        Path:     "/unknown",
+                        Name:     "unknown",
+                        IsFolder: false,
+                }</span>
+        }
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package dropbox
+
+import (
+        "context"
+        "fmt"
+        "log/slog"
+        "net/http"
+        "os/exec"
+        "runtime"
+        "time"
+
+        "golang.org/x/oauth2"
+)
+
+// InteractiveAuth handles the interactive OAuth2 flow
+type InteractiveAuth struct {
+        authConfig   *AuthConfig
+        server       *http.Server
+        resultChan   chan AuthResult
+        codeVerifier string
+        state        string
+}
+
+// AuthResult represents the result of an authentication flow
+type AuthResult struct {
+        Token *oauth2.Token
+        Error error
+}
+
+// NewInteractiveAuth creates a new interactive authentication handler
+func NewInteractiveAuth(clientID, clientSecret string) *InteractiveAuth <span class="cov0" title="0">{
+        authConfig := NewAuthConfig(clientID, clientSecret, "http://localhost:8080/callback")
+
+        return &amp;InteractiveAuth{
+                authConfig: authConfig,
+                resultChan: make(chan AuthResult, 1),
+        }
+}</span>
+
+// Authenticate starts the interactive OAuth2 flow
+func (ia *InteractiveAuth) Authenticate(ctx context.Context) (*oauth2.Token, error) <span class="cov0" title="0">{
+        // Debug OAuth2 configuration
+        ia.authConfig.DebugOAuth2Config()
+
+        // Start local server for callback
+        if err := ia.startCallbackServer(); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to start callback server: %w", err)
+        }</span>
+        <span class="cov0" title="0">defer ia.stopCallbackServer()
+
+        // Generate authorization URL and store verifier/state
+        authURL, state, codeVerifier, err := StartOAuthFlow(ia.authConfig)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to start OAuth flow: %w", err)
+        }</span>
+
+        // Store for use in callback
+        <span class="cov0" title="0">ia.state = state
+        ia.codeVerifier = codeVerifier
+
+        slog.Debug("OAuth2 flow started",
+                slog.String("auth_url", authURL),
+                slog.String("state", state),
+        )
+
+        // Open browser
+        fmt.Printf("Opening browser for Dropbox authorization...\n")
+        fmt.Printf("If the browser doesn't open automatically, visit: %s\n", authURL)
+
+        if err := openBrowser(authURL); err != nil </span><span class="cov0" title="0">{
+                slog.Warn("Failed to open browser automatically", slog.String("error", err.Error()))
+        }</span>
+
+        // Wait for callback or timeout
+        <span class="cov0" title="0">select </span>{
+        case result := &lt;-ia.resultChan:<span class="cov0" title="0">
+                if result.Error != nil </span><span class="cov0" title="0">{
+                        return nil, result.Error
+                }</span>
+                <span class="cov0" title="0">return result.Token, nil</span>
+        case &lt;-ctx.Done():<span class="cov0" title="0">
+                return nil, fmt.Errorf("authentication timeout or cancelled")</span>
+        case &lt;-time.After(5 * time.Minute):<span class="cov0" title="0">
+                return nil, fmt.Errorf("authentication timeout after 5 minutes")</span>
+        }
+}
+
+// startCallbackServer starts the local HTTP server for OAuth callback
+func (ia *InteractiveAuth) startCallbackServer() error <span class="cov0" title="0">{
+        mux := http.NewServeMux()
+        mux.HandleFunc("/callback", ia.handleCallback)
+        mux.HandleFunc("/", ia.handleRoot)
+
+        ia.server = &amp;http.Server{
+                Addr:    ":8080",
+                Handler: mux,
+        }
+
+        go func() </span><span class="cov0" title="0">{
+                if err := ia.server.ListenAndServe(); err != nil &amp;&amp; err != http.ErrServerClosed </span><span class="cov0" title="0">{
+                        ia.resultChan &lt;- AuthResult{Error: fmt.Errorf("callback server error: %w", err)}
+                }</span>
+        }()
+
+        // Give the server a moment to start
+        <span class="cov0" title="0">time.Sleep(100 * time.Millisecond)
+
+        return nil</span>
+}
+
+// stopCallbackServer stops the local HTTP server
+func (ia *InteractiveAuth) stopCallbackServer() <span class="cov0" title="0">{
+        if ia.server != nil </span><span class="cov0" title="0">{
+                ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+                defer cancel()
+                ia.server.Shutdown(ctx)
+        }</span>
+}
+
+// handleCallback handles the OAuth2 callback
+func (ia *InteractiveAuth) handleCallback(w http.ResponseWriter, r *http.Request) <span class="cov0" title="0">{ // Extract parameters from URL
+        query := r.URL.Query()
+        code := query.Get("code")
+        state := query.Get("state")
+        errorParam := query.Get("error")
+
+        if errorParam != "" </span><span class="cov0" title="0">{
+                errorDesc := query.Get("error_description")
+                err := fmt.Errorf("OAuth error: %s - %s", errorParam, errorDesc)
+                ia.resultChan &lt;- AuthResult{Error: err}
+
+                w.WriteHeader(http.StatusBadRequest)
+                fmt.Fprintf(w, `
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;Authentication Failed&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+        &lt;h1&gt;Authentication Failed&lt;/h1&gt;
+        &lt;p&gt;Error: %s&lt;/p&gt;
+        &lt;p&gt;Description: %s&lt;/p&gt;
+        &lt;p&gt;You can close this window and try again.&lt;/p&gt;
+&lt;/body&gt;
+&lt;/html&gt;`, errorParam, errorDesc)
+                return
+        }</span>
+
+        // Verify state parameter for CSRF protection
+        <span class="cov0" title="0">if state != ia.state </span><span class="cov0" title="0">{
+                err := fmt.Errorf("invalid state parameter")
+                ia.resultChan &lt;- AuthResult{Error: err}
+
+                w.WriteHeader(http.StatusBadRequest)
+                fmt.Fprintf(w, `
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;Authentication Failed&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+        &lt;h1&gt;Authentication Failed&lt;/h1&gt;
+        &lt;p&gt;Invalid state parameter. Possible CSRF attack.&lt;/p&gt;
+        &lt;p&gt;You can close this window and try again.&lt;/p&gt;
+&lt;/body&gt;
+&lt;/html&gt;`)
+                return
+        }</span>
+
+        <span class="cov0" title="0">if code == "" </span><span class="cov0" title="0">{
+                err := fmt.Errorf("no authorization code received")
+                ia.resultChan &lt;- AuthResult{Error: err}
+
+                w.WriteHeader(http.StatusBadRequest)
+                fmt.Fprintf(w, `
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;Authentication Failed&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+        &lt;h1&gt;Authentication Failed&lt;/h1&gt;
+        &lt;p&gt;No authorization code received.&lt;/p&gt;
+        &lt;p&gt;You can close this window and try again.&lt;/p&gt;
+&lt;/body&gt;
+&lt;/html&gt;`)
+                return
+        }</span>
+
+        // Exchange code for token with proper PKCE verifier
+        <span class="cov0" title="0">ctx := context.Background()
+
+        slog.Debug("Exchanging authorization code",
+                slog.String("code", code[:10]+"..."), // Log partial code for security
+                slog.String("state", state),
+        )
+
+        token, err := ia.authConfig.ExchangeCode(ctx, code, ia.codeVerifier)
+        if err != nil </span><span class="cov0" title="0">{
+                slog.Error("Failed to exchange authorization code", slog.String("error", err.Error()))
+                ia.resultChan &lt;- AuthResult{Error: fmt.Errorf("failed to exchange code: %w", err)}
+
+                w.WriteHeader(http.StatusInternalServerError)
+                fmt.Fprintf(w, `
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;Authentication Failed&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+        &lt;h1&gt;Authentication Failed&lt;/h1&gt;
+        &lt;p&gt;Failed to exchange authorization code for token.&lt;/p&gt;
+        &lt;p&gt;Error: %s&lt;/p&gt;
+        &lt;p&gt;You can close this window and try again.&lt;/p&gt;
+&lt;/body&gt;
+&lt;/html&gt;`, err.Error())
+                return
+        }</span>
+
+        // Success
+        <span class="cov0" title="0">ia.resultChan &lt;- AuthResult{Token: token}
+
+        w.WriteHeader(http.StatusOK)
+        fmt.Fprintf(w, `
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;Authentication Successful&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+        &lt;h1&gt;Authentication Successful!&lt;/h1&gt;
+        &lt;p&gt;You have successfully authenticated with Dropbox.&lt;/p&gt;
+        &lt;p&gt;You can now close this window and return to the application.&lt;/p&gt;
+        &lt;script&gt;
+                setTimeout(function() {
+                        window.close();
+                }, 3000);
+        &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;`)</span>
+}
+
+// handleRoot handles requests to the root path
+func (ia *InteractiveAuth) handleRoot(w http.ResponseWriter, r *http.Request) <span class="cov0" title="0">{
+        w.WriteHeader(http.StatusOK)
+        fmt.Fprintf(w, `
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;&lt;title&gt;Dropbox Backup Tool&lt;/title&gt;&lt;/head&gt;
+&lt;body&gt;
+        &lt;h1&gt;Dropbox Backup Tool&lt;/h1&gt;
+        &lt;p&gt;Waiting for OAuth2 callback...&lt;/p&gt;
+        &lt;p&gt;If you haven't been redirected to Dropbox for authentication, please check the console for the authorization URL.&lt;/p&gt;
+&lt;/body&gt;
+&lt;/html&gt;`)
+}</span>
+
+// openBrowser opens the default browser with the given URL
+func openBrowser(url string) error <span class="cov0" title="0">{
+        var cmd string
+        var args []string
+
+        switch runtime.GOOS </span>{
+        case "windows":<span class="cov0" title="0">
+                cmd = "rundll32"
+                args = []string{"url.dll,FileProtocolHandler", url}</span>
+        case "darwin":<span class="cov0" title="0">
+                cmd = "open"
+                args = []string{url}</span>
+        default:<span class="cov0" title="0"> // "linux", "freebsd", "openbsd", "netbsd"
+                cmd = "xdg-open"
+                args = []string{url}</span>
+        }
+
+        <span class="cov0" title="0">return exec.Command(cmd, args...).Start()</span>
+}
+
+// AuthenticateWithStoredToken attempts to use a stored token, falling back to interactive auth
+func AuthenticateWithStoredToken(clientID, clientSecret, accessToken, refreshToken string) (*oauth2.Token, error) <span class="cov0" title="0">{
+        // If we have tokens, try to use them
+        if accessToken != "" </span><span class="cov0" title="0">{
+                token := &amp;oauth2.Token{
+                        AccessToken:  accessToken,
+                        RefreshToken: refreshToken,
+                }
+
+                // Test the token
+                authConfig := NewAuthConfig(clientID, clientSecret, "")
+                client, err := NewWithToken(authConfig, token)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("failed to create client with stored token: %w", err)
+                }</span>
+
+                <span class="cov0" title="0">ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+                defer cancel()
+
+                if err := client.ValidateTokenScopes(ctx); err == nil </span><span class="cov0" title="0">{
+                        slog.Info("Using stored access token")
+                        return token, nil
+                }</span>
+
+                <span class="cov0" title="0">slog.Warn("Stored token is invalid, starting interactive authentication")</span>
+        }
+
+        // Fall back to interactive authentication
+        <span class="cov0" title="0">interactiveAuth := NewInteractiveAuth(clientID, clientSecret)
+        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+        defer cancel()
+
+        return interactiveAuth.Authenticate(ctx)</span>
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package main
+
+import (
+        "context"
+        "fmt"
+        "log/slog"
+        "os"
+
+        "create-dropbox-backup-folder/internal/backup"
+        "create-dropbox-backup-folder/internal/config"
+        "create-dropbox-backup-folder/internal/dropbox"
+
+        "github.com/spf13/cobra"
+        "golang.org/x/oauth2"
+)
+
+var (
+        version = "dev"
+        commit  = "none"
+        date    = "unknown"
+)
+
+func main() <span class="cov0" title="0">{
+        if err := rootCmd.Execute(); err != nil </span><span class="cov0" title="0">{
+                fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+                os.Exit(1)
+        }</span>
+}
+
+var rootCmd = &amp;cobra.Command{
+        Use:   "create-dropbox-backup-folder",
+        Short: "A tool to backup Dropbox files to a local directory",
+        Long: `create-dropbox-backup-folder is a command-line tool that authenticates with
+Dropbox using OAuth2 and downloads all files and folders to a specified
+local directory, preserving the folder structure.
+
+The tool supports incremental backups, exclusion patterns, and configurable
+logging levels. It handles authentication securely and efficiently manages
+API calls to avoid rate limits.`,
+        RunE: runBackup,
+}
+
+var (
+        flagDelete     bool
+        flagExclude    []string
+        flagLogLevel   string
+        flagBackupDir  string
+        flagConfigFile string
+        flagCount      bool
+        flagSize       bool
+)
+
+func init() <span class="cov8" title="1">{
+        rootCmd.Flags().BoolVar(&amp;flagDelete, "delete", false, "Delete local files that don't exist in Dropbox")
+        rootCmd.Flags().StringSliceVar(&amp;flagExclude, "exclude", []string{}, "Exclude patterns (e.g., '*.tmp', 'temp/', '@filename')")
+        rootCmd.Flags().StringVar(&amp;flagLogLevel, "loglevel", "error", "Log level (debug, info, warn, error)")
+        rootCmd.Flags().StringVar(&amp;flagBackupDir, "backup-dir", "", "Custom backup directory (overrides DROPBOX_BACKUP_FOLDER)")
+        rootCmd.Flags().StringVar(&amp;flagConfigFile, "config", "", "Path to configuration file")
+        rootCmd.Flags().BoolVar(&amp;flagCount, "count", false, "Display total number of files and directories processed")
+        rootCmd.Flags().BoolVar(&amp;flagSize, "size", false, "Display total size of files processed")
+
+        // Add version command
+        rootCmd.AddCommand(&amp;cobra.Command{
+                Use:   "version",
+                Short: "Print version information",
+                Run: func(cmd *cobra.Command, args []string) </span><span class="cov0" title="0">{
+                        fmt.Printf("create-dropbox-backup-folder %s\nCommit: %s\nBuilt: %s\n", version, commit, date)
+                }</span>,
+        })
+
+        // Add auth command for interactive authentication
+        <span class="cov8" title="1">rootCmd.AddCommand(&amp;cobra.Command{
+                Use:   "auth",
+                Short: "Authenticate with Dropbox using OAuth2",
+                Long: `Start an interactive OAuth2 authentication flow with Dropbox.
+This will open your web browser and guide you through the authentication process.
+After successful authentication, save the tokens to your .env file.`,
+                RunE: runAuth,
+        })</span>
+}
+
+func runBackup(cmd *cobra.Command, args []string) error <span class="cov0" title="0">{
+        // Parse and validate configuration
+        cfg, err := config.Load(config.Options{
+                ConfigFile: flagConfigFile,
+                BackupDir:  flagBackupDir,
+                LogLevel:   flagLogLevel,
+                Delete:     flagDelete,
+                Exclude:    flagExclude,
+                ShowCount:  flagCount,
+                ShowSize:   flagSize,
+        })
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to load configuration: %w", err)
+        }</span>
+
+        // Setup logging
+        <span class="cov0" title="0">setupLogging(cfg.LogLevel)
+
+        slog.Info("Starting Dropbox backup",
+                slog.String("backup_dir", cfg.BackupDir),
+                slog.String("log_level", cfg.LogLevel),
+                slog.Bool("delete_enabled", cfg.Delete),
+                slog.Int("exclude_patterns", len(cfg.Exclude)),
+        )
+
+        // Create backup engine
+        backupEngine, err := backup.New(cfg)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to create backup engine: %w", err)
+        }</span>
+
+        // Create context with cancellation
+        <span class="cov0" title="0">ctx, cancel := context.WithCancel(context.Background())
+        defer cancel()
+
+        // Run backup
+        if err := backupEngine.Run(ctx); err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("backup failed: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">slog.Info("Backup completed successfully")
+        return nil</span>
+}
+
+func setupLogging(level string) <span class="cov0" title="0">{
+        var logLevel slog.Level
+        switch level </span>{
+        case "debug":<span class="cov0" title="0">
+                logLevel = slog.LevelDebug</span>
+        case "info":<span class="cov0" title="0">
+                logLevel = slog.LevelInfo</span>
+        case "warn":<span class="cov0" title="0">
+                logLevel = slog.LevelWarn</span>
+        case "error":<span class="cov0" title="0">
+                logLevel = slog.LevelError</span>
+        default:<span class="cov0" title="0">
+                logLevel = slog.LevelError</span>
+        }
+
+        <span class="cov0" title="0">opts := &amp;slog.HandlerOptions{
+                Level: logLevel,
+        }
+
+        handler := slog.NewTextHandler(os.Stderr, opts)
+        logger := slog.New(handler)
+        slog.SetDefault(logger)</span>
+}
+
+func runAuth(cmd *cobra.Command, args []string) error <span class="cov0" title="0">{
+        // Setup basic logging
+        setupLogging("info")
+
+        // Check for required environment variables
+        clientID := os.Getenv("DROPBOX_CLIENT_ID")
+        clientSecret := os.Getenv("DROPBOX_CLIENT_SECRET")
+
+        if clientID == "" || clientSecret == "" </span><span class="cov0" title="0">{
+                return fmt.Errorf(`missing required environment variables:
+Please set DROPBOX_CLIENT_ID and DROPBOX_CLIENT_SECRET in your .env file.
+
+Get these credentials from: https://www.dropbox.com/developers/apps
+
+Example .env file:
+DROPBOX_CLIENT_ID="your_app_key_here"
+DROPBOX_CLIENT_SECRET="your_app_secret_here"`)
+        }</span>
+
+        <span class="cov0" title="0">fmt.Println("🔐 Starting Dropbox OAuth2 authentication...")
+        fmt.Println("📱 This will open your web browser for authentication.")
+        fmt.Println("")
+
+        // Import the dropbox package
+        // Note: We need to add the import at the top of the file
+        token, err := authenticateInteractively(clientID, clientSecret)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("authentication failed: %w", err)
+        }</span>
+
+        <span class="cov0" title="0">fmt.Println("")
+        fmt.Println("✅ Authentication successful!")
+        fmt.Println("")
+        fmt.Println("🔑 Add these tokens to your .env file:")
+        fmt.Println("")
+        fmt.Printf("DROPBOX_ACCESS_TOKEN=\"%s\"\n", token.AccessToken)
+        if token.RefreshToken != "" </span><span class="cov0" title="0">{
+                fmt.Printf("DROPBOX_REFRESH_TOKEN=\"%s\"\n", token.RefreshToken)
+        }</span>
+        <span class="cov0" title="0">fmt.Println("")
+        fmt.Println("💡 You can now run the backup command:")
+        fmt.Println("   ./create-dropbox-backup-folder --loglevel info")
+
+        return nil</span>
+}
+
+// authenticateInteractively handles the interactive OAuth flow
+func authenticateInteractively(clientID, clientSecret string) (*oauth2.Token, error) <span class="cov0" title="0">{
+        // Use the interactive authentication from our dropbox package
+        return dropbox.AuthenticateWithStoredToken(clientID, clientSecret, "", "")
+}</span>
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>
