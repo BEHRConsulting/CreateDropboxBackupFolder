@@ -3,9 +3,9 @@
 A command-line tool that creates complete backup of Dropbox account to local directory, preserving folder structure and providing incremental sync capabilities.
 
 ## AI Generated (mostly) 
-- I kept tweeking the prompt to get the functions I needed.
-- This was a test using Github's Copilot in agent mode and Claude Sonnet 4 AI model.
-- The prompts I used the generate this app are on the bottom of the file [copilot-instructions.md](.github/copilot-instructions.md).
+- This was an experiment using Github's Copilot in agent mode and Claude Sonnet 4 AI model.
+- I kept tweeking the prompts to get the functions I needed.
+- The prompts I used the generate this app are on the bottom of the file CreateDropboxBackupFolder-prompts.txt.
 
 ## Workflow
 - My laptop does not have the internal storage to download my entire dropbox, so it doesn't get backed up as I wanted it to. I run this app on my external drive to get a full backup.
