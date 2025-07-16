@@ -1,0 +1,32 @@
+Application name is create-dropbox-backup-folder
+
+This project is a Golang application that copies all files from a Dropbox account into a local folder. The app should authenticate with Dropbox, list all files and folders recursively, and download them to a specified local directory, preserving the folder structure.
+
+If a file exists in the specified local directory, it should only be overwritten if the file in Dropbox is newer than the local file.
+
+Use production authentication methods and libraries for Dropbox, such as OAuth2, to ensure secure access to the user's Dropbox account.
+
+If the parameter --delete is provided and a file does not exist in the local directory, delete the file from the local directory.
+
+If the parameter --exclude is provided, the app should skip downloading files that match the specified patterns (e.g., `*.tmp`, `*.log`) or directories (e.g., `temp/`, `cache/`) or @filename for a file of exclusions.
+
+if the parameter --count is provided, display total number of files and directories processed.
+
+if the parameter --size is provided, display the total size of files processed.
+
+If the environment variable `DROPBOX_BACKUP_FOLDER` is not set, the app should create a default backup folder named `./dropbox_backup_yyyy-mm-dd-hh-mm-ss`, where the timestamp reflects the current date and time.
+
+If the environment variable `DROPBOX_BACKUP_FOLDER` is set, the app should use that path as the backup folder.
+
+If the parameter --loglevel is provided, the app should set the logging level accordingly. The default logging level should be "error", but it can be set to "debug" or "info" based on the user's preference.
+
+Create unit tests.
+
+The app should handle errors gracefully, providing clear messages if something goes wrong, such as authentication failures, network issues, or file system errors.
+
+The app should be efficient in terms of API calls to Dropbox, minimizing the number of requests made to avoid hitting rate limits.
+
+The code should be well-structured and modular, making it easy to maintain and extend in the future.
+
+The app should include comments and documentation to explain the functionality and usage.
+```
